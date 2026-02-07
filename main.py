@@ -9,7 +9,7 @@ from typing import Optional, Iterable, List
 
 
 def get_circuit() -> QuantumCircuit:
-    qc = QuantumCircuit(5, 0)
+    qc = QuantumCircuit(5, 1)
     qc.h(0)
     qc.x(1)
     qc.y(2)
@@ -21,6 +21,8 @@ def get_circuit() -> QuantumCircuit:
     qc.h(3)
     qc.cy(3, 1)
     qc.cx(2, 4)
+    
+    # qc.measure(0, 0)
 
     return qc
 
@@ -77,40 +79,36 @@ def find_kth_gate_on_qubit(qc: QuantumCircuit, gate_name: str, q: int, k: int) -
 
 def insert_single_qubit_ops_at(
     qc: QuantumCircuit,
-    insert_idx: int,
+    insert_idx: Optional[int],
     qubit: int,
     ops: Iterable[Instruction],
 ) -> None:
     ops_list: List[Instruction] = list(ops)
-    
-    # Corner Case
-    
-    #TODO: What if we want to add gate at the end of qubit, without measurement being added?
 
-    # ************** Edge case checks begin *********************
-
-    if insert_idx < 0 or insert_idx > len(qc.data):
-        raise IndexError(f"insert_idx must be in [0, {len(qc.data)}], got {insert_idx}")
-
+    # Edge case checks
     if qubit < 0 or qubit >= qc.num_qubits:
         raise IndexError(f"qubit must be in [0, {qc.num_qubits-1}], got {qubit}")
 
+    # Normalize None to "append before the first measurement"
+    if insert_idx is None:
+        try:
+            insert_idx = find_kth_gate_on_qubit(qc, "measure", qubit, 1)
+        except ValueError:
+            insert_idx = len(qc.data) # simply append if there is no measurement
+
+    if insert_idx < 0 or insert_idx > len(qc.data):
+        raise IndexError(f"insert_idx must be in [0, {len(qc.data)}] or None, got {insert_idx}")
+
     for op in ops_list:
         if getattr(op, "num_qubits", None) != 1:
-            raise ValueError(
-                f"Only single-qubit ops allowed, got {op.name} with num_qubits={op.num_qubits}"
-            )
+            raise ValueError(f"Only single-qubit ops allowed, got {op.name} with num_qubits={op.num_qubits}")
 
-    # ************** Edge case checks end *********************
-
-    # Get the data at the required qubit
+    # Insert ops
     q = qc.qubits[qubit]
-
+    
     for offset, op in enumerate(ops_list):
         ci = CircuitInstruction(op, qubits=(q,), clbits=())
-        qc.data.insert(
-            insert_idx + offset, ci
-        )  # Adding offset because each insertion will increase the insert_idx by 1
+        qc.data.insert(insert_idx + offset, ci)
 
 
 def pop_single_qubit_op_at(
@@ -179,14 +177,14 @@ draw_qc(qc, filename='original.png', block=False)
 #     print(f"{i}: {op.name} on {[q._index for q in qubits]}")
 
 
-idx = find_kth_gate_on_qubit(qc, gate_name="x", q=1, k=1)
-print("k-th gate index in qc.data:", idx, qc.data[idx].operation.name)
+# idx = find_kth_gate_on_qubit(qc, gate_name="x", q=1, k=1)
+# print("k-th gate index in qc.data:", idx, qc.data[idx].operation.name)
 insert_single_qubit_ops_at(
-    qc, insert_idx=idx, qubit=1, ops=[HGate(), ZGate()]
+    qc, insert_idx=None, qubit=0, ops=[HGate(), ZGate()]
 )
 
-to_replace = find_kth_gate_on_qubit(qc, 'h', q=3, k=1)
+# to_replace = find_kth_gate_on_qubit(qc, 'h', q=3, k=1)
 
-replace_single_qubit_ops_at(qc, idx=to_replace, ops=[XGate(), YGate(), XGate()])
+# replace_single_qubit_ops_at(qc, idx=to_replace, ops=[XGate(), YGate(), XGate()])
 
 draw_qc(qc)
