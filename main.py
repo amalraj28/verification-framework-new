@@ -1,12 +1,12 @@
 from copy import deepcopy
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction, CircuitInstruction, Qubit
+from qiskit.circuit import Instruction, CircuitInstruction, Qubit, Gate
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit, DAGDependency
 from qiskit.visualization import dag_drawer
 import matplotlib.pyplot as plt
 from typing import Optional, Iterable, List, TypedDict, NotRequired
-from sequences import inverse_pairs
+from sequences import inverse_pairs, compositeGateSequences
 
 
 def get_circuit() -> QuantumCircuit:
@@ -161,6 +161,10 @@ class LocationParams(TypedDict):
     qubit: int # make qubit List[int] for multi-qubit gates
     occurrence: NotRequired[int]
 
+class CompositeGatesStruct(TypedDict):
+    aux: Gate
+    res: Gate
+
 
 def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[str]): 
     gate_name = location_params['gate_name']
@@ -184,8 +188,24 @@ def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[
     return qc1
 
 
+def compositeGates(qc: QuantumCircuit, location_params: LocationParams, ops: CompositeGatesStruct): 
+    gate_name = location_params['gate_name']
+    qubit = location_params['qubit']
+    occurrence = location_params.get('occurrence', 1)
+    idx = find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
+    
+    operators = [ops["aux"], ops["res"]]
+    
+    qc1 = deepcopy(qc)
+    
+    insert_single_qubit_ops_at(qc1, idx, qubit, ops=operators)
+    
+    return qc1
+
+
 qc = get_circuit()
 draw_qc(qc)
 
-qc1 = inverseGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, ['x', 'y', 'tdg'])
+
+qc1 = compositeGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, compositeGateSequences) # type: ignore
 draw_qc(qc1)
