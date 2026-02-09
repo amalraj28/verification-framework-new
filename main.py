@@ -1,11 +1,12 @@
+from copy import deepcopy
 from qiskit import QuantumCircuit
 from qiskit.circuit import Instruction, CircuitInstruction, Qubit
-from qiskit.circuit.library import HGate, ZGate, XGate, YGate
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit, DAGDependency
 from qiskit.visualization import dag_drawer
 import matplotlib.pyplot as plt
-from typing import Optional, Iterable, List
+from typing import Optional, Iterable, List, TypedDict, NotRequired
+from sequences import inverse_pairs
 
 
 def get_circuit() -> QuantumCircuit:
@@ -50,7 +51,7 @@ def qubit_index(qubit) -> int:
     return getattr(qubit, "index", getattr(qubit, "_index"))
 
 
-def find_kth_gate_on_qubit(qc: QuantumCircuit, gate_name: str, q: int, k: int) -> int:
+def find_kth_gate_on_qubit(qc: QuantumCircuit, gate_name: str, qubit: int, k: int) -> int:
     """
     Returns the global index i into qc.data for the k-th occurrence of `gate_name`
     acting on qubit `q`. Raises if not found.
@@ -59,22 +60,18 @@ def find_kth_gate_on_qubit(qc: QuantumCircuit, gate_name: str, q: int, k: int) -
         raise ValueError("k must be >= 1")
 
     count = 0
-    for i, data in enumerate(qc.data):
-        op = data.operation
-        qubits = (
-            data.qubits
-        )  # qubits is a tuple, with each entry being of type Qubit, denoting the qubit index on which the gate is acting. Length = Number of qubits the gate is acting on
+    
+    for i, ci in enumerate(qc.data):
+        op = ci.operation
+        qubits = ci.qubits  # qubits is a tuple, with each entry being of type Qubit, denoting the qubit index on which the gate is acting. Length = Number of qubits the gate is acting on
 
-        # Since you're focusing on single-qubit gates only:
-        if len(qubits) != 1:
-            continue
-
-        if qubit_index(qubits[0]) == q and op.name == gate_name:
+        if op.name == gate_name and any(qubit_index(qb) == qubit for qb in qubits): 
             count += 1
+            
             if count == k:
                 return i
 
-    raise ValueError(f"Did not find {k}-th '{gate_name}' on qubit {q}")
+    raise ValueError(f"Did not find {k}-th '{gate_name}' on qubit {qubit}")
 
 
 def insert_single_qubit_ops_at(
@@ -159,32 +156,36 @@ def replace_single_qubit_ops_at(
     insert_single_qubit_ops_at(qc, insert_idx=idx, qubit=q_idx, ops=ops)
 
 
+class LocationParams(TypedDict):
+    gate_name: str
+    qubit: int # make qubit List[int] for multi-qubit gates
+    occurrence: NotRequired[int]
+
+
+def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[str]): 
+    gate_name = location_params['gate_name']
+    qubit = location_params['qubit']
+    occurrence = location_params.get('occurrence', 1)
+    idx = find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
+    
+    operators = []
+    
+    for token in ops:
+        if token not in inverse_pairs:
+            raise ValueError(f"Unknown inverse-pair token: {token}")
+        
+        for gate in inverse_pairs[token]:
+            operators.append(gate())
+    
+    qc1 = deepcopy(qc)
+    
+    insert_single_qubit_ops_at(qc1, idx, qubit, ops=operators)
+    
+    return qc1
+
+
 qc = get_circuit()
-draw_qc(qc, filename='original.png', block=False)
-# qc.draw('mpl')
-# plt.show()
-
-# dag = circuit_to_dag(qc)
-# plot_dag(dag)
-
-# print_dag_data(dag)
-
-# for i, data in enumerate(qc.data):
-#     op = data.operation
-#     qubits = data.qubits
-#     clbits = data.clbits
-
-#     print(f"{i}: {op.name} on {[q._index for q in qubits]}")
-
-
-# idx = find_kth_gate_on_qubit(qc, gate_name="x", q=1, k=1)
-# print("k-th gate index in qc.data:", idx, qc.data[idx].operation.name)
-insert_single_qubit_ops_at(
-    qc, insert_idx=None, qubit=0, ops=[HGate(), ZGate()]
-)
-
-# to_replace = find_kth_gate_on_qubit(qc, 'h', q=3, k=1)
-
-# replace_single_qubit_ops_at(qc, idx=to_replace, ops=[XGate(), YGate(), XGate()])
-
 draw_qc(qc)
+
+qc1 = inverseGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, ['x', 'y', 'tdg'])
+draw_qc(qc1)
