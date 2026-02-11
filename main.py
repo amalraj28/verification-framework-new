@@ -167,6 +167,41 @@ class CompositeGatesStruct(TypedDict):
     res: Gate
 
 
+SequenceBook = Dict[str, List[List[str]]]
+
+
+def sequenceReplaceGates(qc: QuantumCircuit, location_params: LocationParams, sequence_book: SequenceBook, variant: Optional[int] = None) -> QuantumCircuit:
+    gate_name = location_params["gate_name"]
+    qubit = location_params["qubit"]
+    occurrence = location_params.get("occurrence", 1)
+
+    if gate_name not in sequence_book:
+        raise ValueError(f"No sequences defined for gate: {gate_name}")
+
+    recipes = sequence_book[gate_name]
+
+    if not recipes:
+        raise ValueError(f"Empty sequence list for gate: {gate_name}")
+
+    if variant is None:
+        variant = random.randrange(len(recipes))
+
+    if type(variant) != int or variant < 0 or variant >= len(recipes):
+        raise IndexError(f"variant must be in [0, {len(recipes)-1}], got {variant}")
+
+    idx = find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
+
+    seq_names = recipes[variant]
+    gate_classes = get_single_qubit_ops(seq_names)     # returns constructors/classes
+    ops = [cls() for cls in gate_classes]              # instantiate here
+
+    qc1 = deepcopy(qc)
+
+    replace_single_qubit_ops_at(qc1, idx, ops=ops, require_gate_name=gate_name)
+
+    return qc1
+
+
 def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[str]): 
     gate_name = location_params['gate_name']
     qubit = location_params['qubit']
@@ -204,9 +239,25 @@ def compositeGates(qc: QuantumCircuit, location_params: LocationParams, ops: Com
     return qc1
 
 
+def cloakedGates(qc: QuantumCircuit, location_params: LocationParams, variant: Optional[int] = 0) -> QuantumCircuit:
+    return sequenceReplaceGates(qc, location_params, cloaked_gates_sequences, variant)
+
+
+def delayedGates(qc: QuantumCircuit, location_params: LocationParams, variant: Optional[int] = 0) -> QuantumCircuit:
+    return sequenceReplaceGates(qc, location_params, delayed_gates_sequences, variant)
+
+
 qc = get_circuit()
-draw_qc(qc)
+draw_qc(qc, block=False)
 
+qc1 = inverseGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, ["h", "t", "s"])
+draw_qc(qc1, block=False)
 
-qc1 = compositeGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, compositeGateSequences) # type: ignore
-draw_qc(qc1)
+qc2 = compositeGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, compositeGateSequences) # type: ignore
+draw_qc(qc2, block=False)
+
+qc3 = cloakedGates(qc, {"gate_name": "y", "qubit": 2, "occurrence": 1})
+draw_qc(qc3, block=False)
+
+qc4 = delayedGates(qc, {"gate_name": "h", "qubit": 3, "occurrence": 1})
+draw_qc(qc4)
