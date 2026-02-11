@@ -1,12 +1,13 @@
 from copy import deepcopy
+import matplotlib.pyplot as plt
 from qiskit import QuantumCircuit
 from qiskit.circuit import Instruction, CircuitInstruction, Qubit, Gate
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit, DAGDependency
 from qiskit.visualization import dag_drawer
-import matplotlib.pyplot as plt
-from typing import Optional, Iterable, List, TypedDict, NotRequired
-from sequences import inverse_pairs, compositeGateSequences
+import random
+from sequences import inverse_pairs, compositeGateSequences, cloaked_gates_sequences, get_single_qubit_ops, delayed_gates_sequences
+from typing import Optional, Iterable, List, TypedDict, NotRequired, Dict
 
 
 def get_circuit() -> QuantumCircuit:
