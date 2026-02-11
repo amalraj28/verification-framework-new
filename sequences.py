@@ -1,15 +1,40 @@
 from qiskit import QuantumCircuit
 from qiskit.circuit.library import HGate, XGate, YGate, ZGate, SGate, SdgGate, TGate, TdgGate
 
+
+_SINGLE_QUBIT_GATE_MAP = {
+    "h": HGate,
+    "x": XGate,
+    "y": YGate,
+    "z": ZGate,
+    "s": SGate,
+    "sdg": SdgGate,
+    "t": TGate,
+    "tdg": TdgGate,
+}
+
+
+def get_single_qubit_ops(seq: list[str]):
+    ops = []
+
+    for name in seq:
+        if name not in _SINGLE_QUBIT_GATE_MAP:
+            raise ValueError(f"Unsupported single-qubit gate name: {name}")
+
+        ops.append(_SINGLE_QUBIT_GATE_MAP[name])
+
+    return ops
+
+
 inverse_pairs = {
-    "h": [HGate, HGate],
-    "t": [TGate, TdgGate],
-    "s": [SGate, SdgGate],
-    "tdg": [TdgGate, TGate],
-    "sdg": [SdgGate, SGate],
-    "x": [XGate, XGate],
-    "y": [YGate, YGate],
-    "z": [ZGate, ZGate],    
+    "h": ["h", "h"],
+    "t": ["t", "tdg"],
+    "s": ["s", "sdg"],
+    "tdg": ["tdg", "t"],
+    "sdg": ["sdg", "s"],
+    "x": ["x", "x"],
+    "y": ["y", "y"],
+    "z": ["z", "z"],
 }
 
 

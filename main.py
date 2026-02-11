@@ -186,7 +186,7 @@ def sequenceReplaceGates(qc: QuantumCircuit, location_params: LocationParams, se
     if variant is None:
         variant = random.randrange(len(recipes))
 
-    if type(variant) != int or variant < 0 or variant >= len(recipes):
+    if not isinstance(variant, int) or variant < 0 or variant >= len(recipes):
         raise IndexError(f"variant must be in [0, {len(recipes)-1}], got {variant}")
 
     idx = find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
@@ -214,7 +214,9 @@ def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[
         if token not in inverse_pairs:
             raise ValueError(f"Unknown inverse-pair token: {token}")
         
-        for gate in inverse_pairs[token]:
+        gate_classes = get_single_qubit_ops(inverse_pairs[token])
+
+        for gate in gate_classes:
             operators.append(gate())
     
     qc1 = deepcopy(qc)
