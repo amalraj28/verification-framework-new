@@ -1,30 +1,28 @@
+from __future__ import annotations
+from copy import deepcopy
 from qiskit import QuantumRegister
-from qiskit.converters import circuit_to_dag
-from qiskit.dagcircuit import DAGCircuit, DAGDependency, DAGOpNode
-from qiskit.visualization import dag_drawer
-from qiskit import QuantumCircuit
-import matplotlib.pyplot as plt
-from typing import Optional, Iterable, List
-from qiskit.circuit import Instruction
+from qiskit.circuit import Instruction, Gate
+from qiskit.dagcircuit import DAGCircuit, DAGOpNode
+import random
+from typing import Iterable, List, Optional, TypedDict, NotRequired, Dict
 
+# --------- types ---------
 
-def qubit_index(qubit) -> int:
-    # Works across versions
-    return getattr(qubit, "index", getattr(qubit, "_index"))
+class LocationParams(TypedDict):
+    gate_name: str
+    qubit: int
+    occurrence: NotRequired[int]
 
+class CompositeGatesStruct(TypedDict):
+    aux: Gate
+    res: Gate
 
-def plot_dag(dag: DAGCircuit | DAGDependency, filename: Optional[str] = None):
-    fig = dag_drawer(dag, filename=filename)
-    plt.imshow(fig)
-    plt.axis("off")
-    plt.show()
+SequenceBook = Dict[str, List[List[str]]]
 
+# --------- helpers you already have (or very close) ---------
 
-def print_dag_data(dag: DAGCircuit):
-    data = dag.topological_op_nodes()
-
-    for i, node in enumerate(data):
-        print(f"{i}: {node.name} on {[q._index for q in node.qargs]}")
+def qubit_index(qb) -> int:
+    return getattr(qb, "index", getattr(qb, "_index"))
 
 
 def dag_find_kth_gate_on_qubit(
@@ -58,46 +56,35 @@ def dag_insert_single_qubit_ops_before_node(
     target_qubit: int,
     ops: Iterable[Instruction],
 ) -> None:
-    """
-    Inserts the given single-qubit ops BEFORE `target_node` on the wire `target_qubit`.
-
-    Implementation: substitute target_node with a small DAG:
-      (ops on selected wire) ; (original target_node op)
-    """
-    ops_list: List[Instruction] = list(ops)
+    ops_list = list(ops)
     for op in ops_list:
         if getattr(op, "num_qubits", None) != 1:
             raise ValueError(f"Only single-qubit insert ops supported, got {op.name}")
 
-    # Identify which position inside target_node.qargs corresponds to target_qubit
     positions = [i for i, qb in enumerate(target_node.qargs) if qubit_index(qb) == target_qubit]
+
     if not positions:
         raise ValueError(
             f"Target '{target_node.name}' does not touch qubit {target_qubit}. "
-            f"Target qargs = {[qubit_index(q) for q in target_node.qargs]}"
+            f"qargs={[qubit_index(q) for q in target_node.qargs]}"
         )
 
-    # If target_node touches the same qubit multiple times (rare), pick the first.
     pos = positions[0]
-
-    # Build a replacement circuit with the SAME number of qubits as target_node.qargs
-    # so we can map replacement wires -> original wires easily.
     n = len(target_node.qargs)
 
-    # Apply inserted ops on the chosen wire index `pos`
     rep_dag = DAGCircuit()
     qreg = QuantumRegister(n, "q")
     rep_dag.add_qreg(qreg)
 
-
     for op in ops_list:
-        # Insert ops on the chosen wire
         rep_dag.apply_operation_back(op, qargs=[qreg[pos]], cargs=[])
 
-    # Re-apply original op on all wires (same order)
-    rep_dag.apply_operation_back(target_node.op, qargs=[qreg[i] for i in range(n)], cargs=list(target_node.cargs))
+    rep_dag.apply_operation_back(
+        target_node.op,
+        qargs=[qreg[i] for i in range(n)],
+        cargs=list(target_node.cargs),
+    )
 
-    # Dict wire mapping
     wire_map = {qreg[i]: target_node.qargs[i] for i in range(n)}
     dag.substitute_node_with_dag(target_node, rep_dag, wires=wire_map)
 
@@ -129,58 +116,208 @@ def dag_replace_single_qubit_node_with_sequence(
         if getattr(op, "num_qubits", None) != 1:
             raise ValueError(f"Only single-qubit ops supported, got {op.name}")
 
-    rep = QuantumCircuit(1)
+    rep_dag = DAGCircuit()
+    qreg = QuantumRegister(1, "q")
+    rep_dag.add_qreg(qreg)
+    q0 = qreg[0]
+
     for op in ops_list:
-        rep.append(op, [0])
-    rep_dag = circuit_to_dag(rep)
+        rep_dag.apply_operation_back(op, qargs=[q0], cargs=[])
 
-    # Dict mapping (rep_dag bits -> target_node bits)
-    wire_map = {rep_dag.qubits[0]: target_node.qargs[0]}
-    # If you ever replace something involving clbits, also map rep_dag.clbits[...] here.
-
+    wire_map = {q0: target_node.qargs[0]}
     dag.substitute_node_with_dag(target_node, rep_dag, wires=wire_map)
 
+# --------- DAG-level obfuscations ---------
 
-# qc = QuantumCircuit(2)
-# qc.h(0)
-# qc.cx(0, 1)
+def inverseGatesDAG(
+    dag: DAGCircuit,
+    location_params: LocationParams,
+    ops: List[str],
+    inverse_pairs: Dict[str, List[type[Instruction]]],
+) -> DAGCircuit:
+    """
+    Insert inverse-pair sequences before a located node, on the specified qubit.
+    ops is list of tokens like ["x","y","tdg"] and inverse_pairs maps token -> [GateClass, GateClass]
+    """
+    gate_name = location_params["gate_name"]
+    qubit = location_params["qubit"]
+    occurrence = location_params.get("occurrence", 1)
 
-# dag = circuit_to_dag(qc)
-# print_dag_data(dag)
-# plot_dag(dag)
+    target_node = dag_find_kth_gate_on_qubit(dag, gate_name, qubit, occurrence)
+
+    insert_ops: List[Instruction] = []
+    for token in ops:
+        if token not in inverse_pairs:
+            raise ValueError(f"Unknown inverse-pair token: {token}")
+        for gate_cls in inverse_pairs[token]:
+            insert_ops.append(gate_cls())
+
+    dag1 = deepcopy(dag)
+    
+    dag_insert_single_qubit_ops_before_node(dag1, target_node=target_node, target_qubit=qubit, ops=insert_ops)
+    
+    return dag1
+
+def compositeGatesDAG(
+    dag: DAGCircuit,
+    location_params: LocationParams,
+    composite_ops: CompositeGatesStruct,
+) -> DAGCircuit:
+    """
+    Insert [aux, res] (both single-qubit Gates) before a located node on the specified qubit.
+    """
+    gate_name = location_params["gate_name"]
+    qubit = location_params["qubit"]
+    occurrence = location_params.get("occurrence", 1)
+
+    target_node = dag_find_kth_gate_on_qubit(dag, gate_name, qubit, occurrence)
+
+    insert_ops: List[Instruction] = [composite_ops["aux"], composite_ops["res"]]
+
+    dag1 = deepcopy(dag)
+    
+    dag_insert_single_qubit_ops_before_node(dag1, target_node=target_node, target_qubit=qubit, ops=insert_ops)
+    
+    return dag1
+
+
+def sequenceReplaceGatesDAG(
+    dag: DAGCircuit,
+    location_params: LocationParams,
+    sequence_book: SequenceBook,
+    get_single_qubit_ops,  # your function: List[str] -> List[GateClass]
+    variant: Optional[int] = None,
+) -> DAGCircuit:
+    """
+    Generic: replace the located single-qubit gate with a chosen recipe sequence.
+    Works for cloaked and delayed.
+    """
+    gate_name = location_params["gate_name"]
+    qubit = location_params["qubit"]
+    occurrence = location_params.get("occurrence", 1)
+
+    if gate_name not in sequence_book:
+        raise ValueError(f"No sequences defined for gate: {gate_name}")
+
+    recipes = sequence_book[gate_name]
+    if not recipes:
+        raise ValueError(f"Empty sequence list for gate: {gate_name}")
+
+    if variant is None:
+        variant = random.randrange(len(recipes))
+    
+    if variant < 0 or variant >= len(recipes):
+        raise IndexError(f"variant must be in [0, {len(recipes)-1}], got {variant}")
+
+    target_node = dag_find_kth_gate_on_qubit(dag, gate_name, qubit, occurrence)
+
+    seq_names = recipes[variant]
+    gate_classes = get_single_qubit_ops(seq_names)   # returns constructors/classes
+    replace_ops: List[Instruction] = [gate() for gate in gate_classes]
+
+    dag1 = deepcopy(dag)
+    
+    dag_replace_single_qubit_node_with_sequence(
+        dag1,
+        target_node=target_node,
+        target_qubit=qubit,
+        ops=replace_ops,
+        require_gate_name=gate_name,
+    )
+    
+    return dag1
+
+
+def cloakedGatesDAG(
+    dag: DAGCircuit,
+    location_params: LocationParams,
+    cloaked_gates_sequences: SequenceBook,
+    get_single_qubit_ops,
+    variant: Optional[int] = None,
+) -> DAGCircuit:
+    return sequenceReplaceGatesDAG(dag, location_params, cloaked_gates_sequences, get_single_qubit_ops, variant)
+
+
+def delayedGatesDAG(
+    dag: DAGCircuit,
+    location_params: LocationParams,
+    delayed_gates_sequences: SequenceBook,
+    get_single_qubit_ops,
+    variant: Optional[int] = None,
+) -> DAGCircuit:
+    return sequenceReplaceGatesDAG(dag, location_params, delayed_gates_sequences, get_single_qubit_ops, variant)
+
 
 if __name__ == "__main__":
-    from qiskit.circuit.library import HGate, YGate
+    from qiskit import QuantumCircuit
+    from qiskit.converters import circuit_to_dag
+    from qiskit.visualization import dag_drawer
+    import matplotlib.pyplot as plt
 
-    qc = QuantumCircuit(2)
+    from sequences import (
+        inverse_pairs,
+        cloaked_gates_sequences,
+        delayed_gates_sequences,
+        get_single_qubit_ops,
+    )
+
+    # ----- helper for quick visualization -----
+
+    def show_dag(dag, title=""):
+        print(title)
+        for i, node in enumerate(dag.topological_op_nodes()):
+            print(f"{i}: {node.name} on {[qubit_index(q) for q in node.qargs]}")
+        fig = dag_drawer(dag)
+        plt.imshow(fig)
+        plt.axis("off")
+        plt.show()
+
+    # ----- build sample circuit -----
+    plt.show(block=False)
+    qc = QuantumCircuit(3)
     qc.h(0)
-    qc.cx(0, 1)
+    qc.x(1)
+    qc.cx(1, 2)
+    qc.y(1)
 
     dag = circuit_to_dag(qc)
 
-    print("Original DAG:")
-    print_dag_data(dag)
-    plot_dag(dag)
+    show_dag(dag, "\nOriginal DAG")
 
-    # # Insert H before the first cx, on qubit 1 (target wire)
-    # anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
-    # Insert H before the first cx, on qubit 1 (target wire)
-    anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
-    dag_insert_single_qubit_ops_before_node(dag, anchor, target_qubit=1, ops=[HGate()])
-    # print_dag_data(dag)
-    print("\nModified DAG:")
-    print_dag_data(dag)
-    plot_dag(dag)
+    # ----- inverse gates DAG -----
 
-    anchor = dag_find_kth_gate_on_qubit(dag, "h", qubit=0, k=1)
-    dag_replace_single_qubit_node_with_sequence(
+    dag2 = inverseGatesDAG(
         dag,
-        target_node=anchor,
-        target_qubit=0,
-        ops=[HGate(), YGate(), HGate()],
-        require_gate_name="h",
+        {"gate_name": "x", "qubit": 1, "occurrence": 1},
+        ops=["h", "h"],
+        inverse_pairs={
+            k: [get_single_qubit_ops(v)[0], get_single_qubit_ops(v)[1]]
+            for k, v in inverse_pairs.items()
+        },
     )
 
-    print("\nAfter replace:")
-    print_dag_data(dag)
-    plot_dag(dag)
+    show_dag(dag2, "\nAfter inverseGatesDAG")
+
+    # ----- cloaked gates DAG -----
+
+    dag3 = cloakedGatesDAG(
+        dag,
+        {"gate_name": "y", "qubit": 1, "occurrence": 1},
+        cloaked_gates_sequences,
+        get_single_qubit_ops,
+    )
+
+    show_dag(dag3, "\nAfter cloakedGatesDAG")
+
+    # ----- delayed gates DAG -----
+
+    dag4 = delayedGatesDAG(
+        dag,
+        {"gate_name": "h", "qubit": 0, "occurrence": 1},
+        delayed_gates_sequences,
+        get_single_qubit_ops,
+    )
+
+    show_dag(dag4, "\nAfter delayedGatesDAG")
+
+    plt.show()
