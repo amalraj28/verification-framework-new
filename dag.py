@@ -98,6 +98,44 @@ def dag_insert_single_qubit_ops_before_node(
 
     dag.substitute_node_with_dag(target_node, rep_dag, wires=wire_map)
 
+def dag_replace_single_qubit_node_with_sequence(
+    dag: DAGCircuit,
+    target_node: DAGOpNode,
+    target_qubit: int,
+    ops: Iterable[Instruction],
+    require_gate_name: Optional[str] = None,
+) -> None:
+    if require_gate_name is not None and target_node.name != require_gate_name:
+        raise ValueError(f"Expected gate '{require_gate_name}', found '{target_node.name}'")
+
+    if len(target_node.qargs) != 1:
+        raise ValueError(
+            f"Only single-qubit replacement supported. "
+            f"Target '{target_node.name}' acts on {len(target_node.qargs)} qubits."
+        )
+
+    if qubit_index(target_node.qargs[0]) != target_qubit:
+        raise ValueError(
+            f"Target node qubit is {qubit_index(target_node.qargs[0])}, "
+            f"but target_qubit={target_qubit}"
+        )
+
+    ops_list = list(ops)
+    for op in ops_list:
+        if getattr(op, "num_qubits", None) != 1:
+            raise ValueError(f"Only single-qubit ops supported, got {op.name}")
+
+    rep = QuantumCircuit(1)
+    for op in ops_list:
+        rep.append(op, [0])
+    rep_dag = circuit_to_dag(rep)
+
+    # IMPORTANT: dict mapping (rep_dag bits -> target_node bits)
+    wire_map = {rep_dag.qubits[0]: target_node.qargs[0]}
+    # If you ever replace something involving clbits, also map rep_dag.clbits[...] here.
+
+    dag.substitute_node_with_dag(target_node, rep_dag, wires=wire_map)
+
 
 # qc = QuantumCircuit(2)
 # qc.h(0)
@@ -108,7 +146,7 @@ def dag_insert_single_qubit_ops_before_node(
 # plot_dag(dag)
 
 if __name__ == "__main__":
-    from qiskit.circuit.library import HGate
+    from qiskit.circuit.library import HGate, YGate
 
     qc = QuantumCircuit(2)
     qc.h(0)
@@ -120,10 +158,23 @@ if __name__ == "__main__":
     print_dag_data(dag)
     plot_dag(dag)
 
-    # Insert H before the first cx, on qubit 1 (target wire)
-    anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
-    dag_insert_single_qubit_ops_before_node(dag, anchor, target_qubit=1, ops=[HGate()])
+    # # Insert H before the first cx, on qubit 1 (target wire)
+    # anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
+    # dag_insert_single_qubit_ops_before_node(dag, anchor, target_qubit=1, ops=[HGate()])
 
-    print("\nModified DAG:")
+    # print("\nModified DAG:")
+    # print_dag_data(dag)
+    # plot_dag(dag)
+
+    node = dag_find_kth_gate_on_qubit(dag, "h", qubit=0, k=1)
+    dag_replace_single_qubit_node_with_sequence(
+        dag,
+        target_node=node,
+        target_qubit=0,
+        ops=[HGate(), YGate(), HGate()],
+        require_gate_name="h",
+    )
+
+    print("\nAfter replace:")
     print_dag_data(dag)
     plot_dag(dag)
