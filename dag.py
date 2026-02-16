@@ -1,3 +1,4 @@
+from qiskit import QuantumRegister
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit, DAGDependency, DAGOpNode
 from qiskit.visualization import dag_drawer
@@ -50,6 +51,7 @@ def dag_find_kth_gate_on_qubit(
 
     raise ValueError(f"Did not find {k}-th '{gate_name}' touching qubit {qubit}")
 
+
 def dag_insert_single_qubit_ops_before_node(
     dag: DAGCircuit,
     target_node: DAGOpNode,
@@ -81,22 +83,24 @@ def dag_insert_single_qubit_ops_before_node(
     # Build a replacement circuit with the SAME number of qubits as target_node.qargs
     # so we can map replacement wires -> original wires easily.
     n = len(target_node.qargs)
-    rep = QuantumCircuit(n)
 
     # Apply inserted ops on the chosen wire index `pos`
+    rep_dag = DAGCircuit()
+    qreg = QuantumRegister(n, "q")
+    rep_dag.add_qreg(qreg)
+
+
     for op in ops_list:
-        rep.append(op, [pos])
+        # Insert ops on the chosen wire
+        rep_dag.apply_operation_back(op, qargs=[qreg[pos]], cargs=[])
 
-    # Re-append the original target_node operation (preserving qargs order)
-    rep.append(target_node.op, list(range(n)))
+    # Re-apply original op on all wires (same order)
+    rep_dag.apply_operation_back(target_node.op, qargs=[qreg[i] for i in range(n)], cargs=list(target_node.cargs))
 
-    rep_dag = circuit_to_dag(rep)
-
-    # Map replacement wires to original wires: qubits then clbits
-    # For most gates, cargs is empty, but this keeps it correct if needed.
-    wire_map = list(target_node.qargs) + list(target_node.cargs)
-
+    # Dict wire mapping
+    wire_map = {qreg[i]: target_node.qargs[i] for i in range(n)}
     dag.substitute_node_with_dag(target_node, rep_dag, wires=wire_map)
+
 
 def dag_replace_single_qubit_node_with_sequence(
     dag: DAGCircuit,
@@ -130,7 +134,7 @@ def dag_replace_single_qubit_node_with_sequence(
         rep.append(op, [0])
     rep_dag = circuit_to_dag(rep)
 
-    # IMPORTANT: dict mapping (rep_dag bits -> target_node bits)
+    # Dict mapping (rep_dag bits -> target_node bits)
     wire_map = {rep_dag.qubits[0]: target_node.qargs[0]}
     # If you ever replace something involving clbits, also map rep_dag.clbits[...] here.
 
@@ -160,16 +164,18 @@ if __name__ == "__main__":
 
     # # Insert H before the first cx, on qubit 1 (target wire)
     # anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
-    # dag_insert_single_qubit_ops_before_node(dag, anchor, target_qubit=1, ops=[HGate()])
-
-    # print("\nModified DAG:")
+    # Insert H before the first cx, on qubit 1 (target wire)
+    anchor = dag_find_kth_gate_on_qubit(dag, "cx", qubit=1, k=1)
+    dag_insert_single_qubit_ops_before_node(dag, anchor, target_qubit=1, ops=[HGate()])
     # print_dag_data(dag)
-    # plot_dag(dag)
+    print("\nModified DAG:")
+    print_dag_data(dag)
+    plot_dag(dag)
 
-    node = dag_find_kth_gate_on_qubit(dag, "h", qubit=0, k=1)
+    anchor = dag_find_kth_gate_on_qubit(dag, "h", qubit=0, k=1)
     dag_replace_single_qubit_node_with_sequence(
         dag,
-        target_node=node,
+        target_node=anchor,
         target_qubit=0,
         ops=[HGate(), YGate(), HGate()],
         require_gate_name="h",
