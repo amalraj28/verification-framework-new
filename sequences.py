@@ -126,4 +126,4 @@ def restore_gate():
     restore.name = "restore"
     return restore
 
-compositeGateSequences = {"aux": auxiliary_gate(), "res": restore_gate()}
+composite_gate_sequences = {"aux": auxiliary_gate(), "res": restore_gate()}

@@ -2,11 +2,10 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 from qiskit import QuantumCircuit
 from qiskit.circuit import Instruction, CircuitInstruction, Qubit, Gate
-from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit, DAGDependency
 from qiskit.visualization import dag_drawer
 import random
-from sequences import inverse_pairs, compositeGateSequences, cloaked_gates_sequences, get_single_qubit_ops, delayed_gates_sequences
+from sequences import inverse_pairs, composite_gate_sequences, cloaked_gates_sequences, get_single_qubit_ops, delayed_gates_sequences
 from typing import Optional, Iterable, List, TypedDict, NotRequired, Dict
 
 
@@ -28,8 +27,9 @@ def get_circuit() -> QuantumCircuit:
 
     return qc
 
-def draw_qc(qc: QuantumCircuit, output: str = 'mpl', filename: Optional[str] = None, block: bool = True):
+def draw_qc(qc: QuantumCircuit, output: str = 'mpl', filename: Optional[str] = None, block: bool = True, title: str = ""):
     qc.draw(output=output, filename=filename)
+    plt.title(title)
     plt.show(block=block)
 
 
@@ -253,13 +253,13 @@ qc = get_circuit()
 draw_qc(qc, block=False)
 
 qc1 = inverseGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, ["h", "t", "s"])
-draw_qc(qc1, block=False)
+draw_qc(qc1, block=False, title="Inverse Gates")
 
-qc2 = compositeGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, compositeGateSequences) # type: ignore
-draw_qc(qc2, block=False)
+qc2 = compositeGates(qc, {"gate_name": "cz", "qubit": 1, "occurrence": 1}, composite_gate_sequences) # type: ignore
+draw_qc(qc2, block=False, title="Composite Gates")
 
 qc3 = cloakedGates(qc, {"gate_name": "y", "qubit": 2, "occurrence": 1})
-draw_qc(qc3, block=False)
+draw_qc(qc3, block=False, title="Cloaked Gates")
 
 qc4 = delayedGates(qc, {"gate_name": "h", "qubit": 3, "occurrence": 1})
-draw_qc(qc4)
+draw_qc(qc4, title="Delayed Gates")
