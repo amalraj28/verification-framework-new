@@ -7,7 +7,7 @@ from qiskit import QuantumRegister
 from qiskit.circuit import Instruction, Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 import random
-from typing import Iterable, List, Optional, TypedDict, Dict, NotRequired, Literal
+from typing import Iterable, List, Optional, TypedDict, Dict
 from sequences import (
     get_single_qubit_ops,
     inverse_pairs,
@@ -21,10 +21,7 @@ from sequences import (
 
 class LocationParams(TypedDict):
     qubit: int
-    index: NotRequired[int]
-    gate_name: NotRequired[str]
-    occurrence: NotRequired[int]
-    mode: NotRequired[Literal["index", "occurrence"]]
+    index: int
 
 
 class CompositeGatesStruct(TypedDict):
@@ -81,67 +78,29 @@ def dag_find_kth_gate_on_qubit(
     raise ValueError(f"Did not find {k}-th '{gate_name}' on qubit {qubit}")
 
 
-def dag_resolve_target_node(
-    dag: DAGCircuit,
-    location_params: LocationParams,
-) -> Optional[DAGOpNode]:
-    qubit = location_params["qubit"]
-    mode = location_params.get("mode", "index")
-
-    if mode == "index":
-        if "index" not in location_params:
-            raise ValueError("index must be provided when mode='index'")
-        index = location_params["index"]
-        return dag_get_node_at_index_on_qubit(dag, qubit, index)
-
-    if mode == "occurrence":
-        gate_name = location_params.get("gate_name")
-        if gate_name is None:
-            raise ValueError("gate_name must be provided when mode='occurrence'")
-        occurrence = location_params.get("occurrence", 1)
-        return dag_find_kth_gate_on_qubit(dag, gate_name, qubit, occurrence)
-
-    raise ValueError(f"Unknown location mode: {mode}")
-
-
 def dag_resolve_insertion_anchor(
     dag: DAGCircuit,
     location_params: LocationParams,
 ) -> Optional[DAGOpNode]:
     """
     Resolve insertion anchor with main.py-like behavior:
-    - mode='index': treat index as global op index, then insert on target qubit at index.
+    - insert on target qubit at index i on that qubit wire.
     - if no such op exists, insert before first measurement on that qubit (if any),
       else append at end of that qubit wire.
-    - mode='occurrence': insert before the located gate occurrence on that qubit.
     """
     qubit = location_params["qubit"]
-    mode = location_params.get("mode", "index")
+    index = location_params["index"]
+    if index < 0:
+        raise IndexError(f"index must be >= 0, got {index}")
+    node = dag_get_node_at_index_on_qubit(dag, qubit, index)
+    if node is not None:
+        return node
 
-    if mode == "occurrence":
-        gate_name = location_params.get("gate_name")
-        if gate_name is None:
-            raise ValueError("gate_name must be provided when mode='occurrence'")
-        occurrence = location_params.get("occurrence", 1)
-        return dag_find_kth_gate_on_qubit(dag, gate_name, qubit, occurrence)
-
-    if mode == "index":
-        if "index" not in location_params:
-            raise ValueError("index must be provided when mode='index'")
-        index = location_params["index"]
-        if index < 0:
-            raise IndexError(f"index must be >= 0, got {index}")
-        node = dag_get_node_at_index_on_qubit(dag, qubit, index)
-        if node is not None:
-            return node
-
-        # Out of range on this qubit: insert before first measure on qubit.
-        try:
-            return dag_find_kth_gate_on_qubit(dag, "measure", qubit, 1)
-        except ValueError:
-            return None
-
-    raise ValueError(f"Unknown location mode: {mode}")
+    # Out of range on this qubit: insert before first measure on qubit.
+    try:
+        return dag_find_kth_gate_on_qubit(dag, "measure", qubit, 1)
+    except ValueError:
+        return None
 
 
 def dag_insert_single_qubit_ops_before_node(
@@ -304,25 +263,26 @@ def sequenceReplaceGatesDAG(
     Replace the gate at the specified index on the specified qubit with a chosen recipe sequence.
     """
     qubit = location_params["qubit"]
-
+    index = location_params["index"]
+    
+    if index < 0:
+        raise IndexError(f"index must be >= 0, got {index}")
+    
     dag1 = deepcopy(dag)
-    target_node = dag_resolve_target_node(dag1, location_params)
+    target_node = dag_get_node_at_index_on_qubit(dag1, qubit, index)
 
     if target_node is None:
-        idx = location_params.get("index")
-        raise Exception(
-            f"Invalid replacement index: {idx}. Must be < number of DAG op nodes={len(list(dag1.topological_op_nodes()))}"
+        raise ValueError(
+            f"Invalid replacement index: {index}. Must be < number of ops on qubit {qubit}"
         )
 
-    gate_name = location_params.get("gate_name", target_node.name)
-    if gate_name != target_node.name:
-        raise ValueError(
-            f"Location points to gate '{target_node.name}', but gate_name='{gate_name}' was requested"
-        )
+    gate_name = target_node.name
+    
     if gate_name not in sequence_book:
         raise ValueError(f"No sequences defined for gate: {gate_name}")
 
     recipes = sequence_book[gate_name]
+    
     if not recipes:
         raise ValueError(f"Empty sequence list for gate: {gate_name}")
 
@@ -344,7 +304,6 @@ def sequenceReplaceGatesDAG(
         target_node=target_node,
         target_qubit=qubit,
         ops=replace_ops,
-        require_gate_name=gate_name,
     )
 
     return dag1

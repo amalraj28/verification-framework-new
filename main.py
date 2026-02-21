@@ -6,7 +6,7 @@ from qiskit.dagcircuit import DAGCircuit, DAGDependency
 from qiskit.visualization import dag_drawer
 import random
 from sequences import inverse_pairs, composite_gate_sequences, cloaked_gates_sequences, get_single_qubit_ops, delayed_gates_sequences
-from typing import Optional, Iterable, List, TypedDict, NotRequired, Dict, Literal
+from typing import Optional, Iterable, List, TypedDict, Dict
 
 
 def get_circuit() -> QuantumCircuit:
@@ -205,10 +205,7 @@ def replace_single_qubit_ops_at(
 
 class LocationParams(TypedDict):
     qubit: int # make qubit List[int] for multi-qubit gates
-    index: NotRequired[int]
-    gate_name: NotRequired[str]
-    occurrence: NotRequired[int]
-    mode: NotRequired[Literal["index", "occurrence"]]
+    index: int
 
 class CompositeGatesStruct(TypedDict):
     aux: Gate
@@ -218,72 +215,33 @@ class CompositeGatesStruct(TypedDict):
 SequenceBook = Dict[str, List[List[str]]]
 
 
-def resolve_location_index(
+def find_global_op_position_for_qubit_index(
     qc: QuantumCircuit,
-    location_params: LocationParams,
-) -> int:
-    mode = location_params.get("mode", "index")
-
-    if mode == "index":
-        if "index" not in location_params:
-            raise ValueError("index must be provided when mode='index'")
-        idx = location_params["index"]
-        if idx < 0:
-            raise IndexError(f"index must be >= 0, got {idx}")
-        return idx
-
-    if mode == "occurrence":
-        gate_name = location_params.get("gate_name")
-        if gate_name is None:
-            raise ValueError("gate_name must be provided when mode='occurrence'")
-        qubit = location_params["qubit"]
-        occurrence = location_params.get("occurrence", 1)
-        return find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
-
-    raise ValueError(f"Unknown location mode: {mode}")
-
-
-def resolve_insertion_index_on_qubit(
-    qc: QuantumCircuit,
-    location_params: LocationParams,
+    qubit: int,
+    index_on_qubit: int,
 ) -> Optional[int]:
-    mode = location_params.get("mode", "index")
-    qubit = location_params["qubit"]
+    if index_on_qubit < 0:
+        raise IndexError(f"index must be >= 0, got {index_on_qubit}")
 
-    if mode == "index":
-        if "index" not in location_params:
-            raise ValueError("index must be provided when mode='index'")
-        idx = location_params["index"]
-        if idx < 0:
-            raise IndexError(f"index must be >= 0, got {idx}")
-        return idx
-
-    if mode == "occurrence":
-        gate_name = location_params.get("gate_name")
-        if gate_name is None:
-            raise ValueError("gate_name must be provided when mode='occurrence'")
-        occurrence = location_params.get("occurrence", 1)
-        gate_pos = find_kth_gate_on_qubit(qc, gate_name, qubit, occurrence)
-        return gate_pos
-
-    raise ValueError(f"Unknown location mode: {mode}")
+    count = 0
+    for i, ci in enumerate(qc.data):
+        if any(qubit_index(qb) == qubit for qb in ci.qubits):
+            if count == index_on_qubit:
+                return i
+            count += 1
+    return None
 
 
 def sequenceReplaceGates(qc: QuantumCircuit, location_params: LocationParams, sequence_book: SequenceBook, variant: Optional[int] = None) -> QuantumCircuit:
-    idx = resolve_location_index(qc, location_params)
-    if idx >= len(qc.data):
+    qubit = location_params["qubit"]
+    idx_on_qubit = location_params["index"]
+    idx = find_global_op_position_for_qubit_index(qc, qubit, idx_on_qubit)
+    if idx is None:
         raise Exception(
-            f"Invalid replacement index: {idx}. Must be < len(qc.data)={len(qc.data)}"
+            f"Invalid replacement index: {idx_on_qubit}. Must be < number of ops on qubit {qubit}"
         )
 
-    gate_name = location_params.get("gate_name", qc.data[idx].operation.name)
-    actual_gate_name = qc.data[idx].operation.name
-
-    if gate_name != actual_gate_name:
-        raise ValueError(
-            f"Location points to gate '{actual_gate_name}' at idx={idx}, "
-            f"but gate_name='{gate_name}' was requested"
-        )
+    gate_name = qc.data[idx].operation.name
 
     if gate_name not in sequence_book:
         raise ValueError(f"No sequences defined for gate: {gate_name}")
@@ -305,14 +263,17 @@ def sequenceReplaceGates(qc: QuantumCircuit, location_params: LocationParams, se
 
     qc1 = deepcopy(qc)
 
-    replace_single_qubit_ops_at(qc1, idx, ops=ops, require_gate_name=gate_name)
+    replace_single_qubit_ops_at(qc1, idx, ops=ops)
 
     return qc1
 
 
 def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[str]):
     qubit = location_params['qubit']
-    idx = resolve_insertion_index_on_qubit(qc, location_params)
+    idx = location_params["index"]
+    
+    if not isinstance(idx, int) or idx < 0: 
+        raise ValueError("index should be a non-negative integer, received {idx}")
     
     operators = []
     
@@ -334,7 +295,10 @@ def inverseGates(qc: QuantumCircuit, location_params: LocationParams, ops: List[
 
 def compositeGates(qc: QuantumCircuit, location_params: LocationParams, ops: CompositeGatesStruct): 
     qubit = location_params['qubit']
-    idx = resolve_insertion_index_on_qubit(qc, location_params)
+    idx = location_params["index"]
+    
+    if not isinstance(idx, int) or idx < 0: 
+        raise ValueError("index should be a non-negative integer, received {idx}")
     
     operators = [ops["aux"], ops["res"]]
     
@@ -354,16 +318,16 @@ def delayedGates(qc: QuantumCircuit, location_params: LocationParams, variant: O
 
 
 qc = get_circuit()
-draw_qc(qc, block=False)
+draw_qc(qc, block=True)
 
-qc1 = inverseGates(qc, {"qubit": 1, "gate_name": "x", "mode": "occurrence", "occurrence": 1}, ["h", "t", "s"])
+qc1 = inverseGates(qc, {"qubit": 1, "index": 1}, ["h", "t", "s"])
 draw_qc(qc1, block=False, title="Inverse Gates")
 
 qc2 = compositeGates(qc, {"qubit": 1, "index": 5}, composite_gate_sequences) # type: ignore
 draw_qc(qc2, block=False, title="Composite Gates")
 
-qc3 = cloakedGates(qc, {"qubit": 2, "index": 2})
+qc3 = cloakedGates(qc, {"qubit": 2, "index": 0})
 draw_qc(qc3, block=False, title="Cloaked Gates")
 
-qc4 = delayedGates(qc, {"qubit": 3, "mode": "occurrence", "gate_name": "h", "occurrence": 1})
+qc4 = delayedGates(qc, {"qubit": 3, "index": 2})
 draw_qc(qc4, title="Delayed Gates")
