@@ -38,39 +38,48 @@ def qubit_index(qb) -> int:
     return getattr(qb, "index", getattr(qb, "_index"))
 
 
-def dag_get_node_at_index_on_qubit(
+def dag_get_node_at_index_on_wire(
     dag: DAGCircuit,
     qubit: int,
     index: int,
 ) -> Optional[DAGOpNode]:
     """
-    Returns the i-th op node (topological order) that touches the given qubit.
-    If index is out of range for that qubit wire, returns None.
+    Returns the i-th op node on the given qubit wire in the wire order.
+    If index is out of range, returns None.
     """
     if index < 0:
         raise IndexError(f"index must be >= 0, got {index}")
 
-    count = 0
-    for node in dag.topological_op_nodes():
-        if any(qubit_index(qb) == qubit for qb in node.qargs):
-            if count == index:
-                return node
-            count += 1
-    return None
+    wire = dag.qubits[qubit]
+
+    # nodes_on_wire yields nodes that affect that wire, in wire order
+    # only_ops=True means only operation nodes (no in/out nodes)
+    nodes = list(dag.nodes_on_wire(wire, only_ops=True))
+
+    # Defensive filter: ensure DAGOpNode (should already be)
+    op_nodes = [n for n in nodes if isinstance(n, DAGOpNode)]
+
+    if index >= len(op_nodes):
+        return None
+    return op_nodes[index]
 
 
-def dag_find_kth_gate_on_qubit(
+def dag_find_kth_gate_on_wire(
     dag: DAGCircuit,
     gate_name: str,
     qubit: int,
     k: int,
 ) -> DAGOpNode:
+    """
+    Returns the k-th op node with name gate_name on the qubit wire (1-indexed).
+    """
     if k <= 0:
         raise ValueError("occurrence must be >= 1")
 
+    wire = dag.qubits[qubit]
     count = 0
-    for node in dag.topological_op_nodes():
-        if node.name == gate_name and any(qubit_index(qb) == qubit for qb in node.qargs):
+    for node in dag.nodes_on_wire(wire, only_ops=True):
+        if isinstance(node, DAGOpNode) and node.name == gate_name:
             count += 1
             if count == k:
                 return node
@@ -82,23 +91,18 @@ def dag_resolve_insertion_anchor(
     dag: DAGCircuit,
     location_params: LocationParams,
 ) -> Optional[DAGOpNode]:
-    """
-    Resolve insertion anchor with main.py-like behavior:
-    - insert on target qubit at index i on that qubit wire.
-    - if no such op exists, insert before first measurement on that qubit (if any),
-      else append at end of that qubit wire.
-    """
     qubit = location_params["qubit"]
     index = location_params["index"]
     if index < 0:
         raise IndexError(f"index must be >= 0, got {index}")
-    node = dag_get_node_at_index_on_qubit(dag, qubit, index)
+
+    node = dag_get_node_at_index_on_wire(dag, qubit, index)
     if node is not None:
         return node
 
-    # Out of range on this qubit: insert before first measure on qubit.
+    # Out of range: insert before first measurement on this wire, else append
     try:
-        return dag_find_kth_gate_on_qubit(dag, "measure", qubit, 1)
+        return dag_find_kth_gate_on_wire(dag, "measure", qubit, 1)
     except ValueError:
         return None
 
@@ -269,7 +273,7 @@ def sequenceReplaceGatesDAG(
         raise IndexError(f"index must be >= 0, got {index}")
     
     dag1 = deepcopy(dag)
-    target_node = dag_get_node_at_index_on_qubit(dag1, qubit, index)
+    target_node = dag_get_node_at_index_on_wire(dag1, qubit, index)
 
     if target_node is None:
         raise ValueError(
