@@ -4,7 +4,7 @@ begin
 
 datatype gate = H | X | Y | Z | S | Sdg | T | Tdg | Aux | Res
 
-fun inverse :: "gate \<Rightarrow> gate" where
+fun inverse :: "gate => gate" where
   "inverse H = H"
 | "inverse X = X"
 | "inverse Y = Y"
@@ -17,11 +17,11 @@ fun inverse :: "gate \<Rightarrow> gate" where
 | "inverse Res = Aux"
 
 locale gate_semantics =
-  fixes U :: "gate \<Rightarrow> 's \<Rightarrow> 's"
+  fixes U :: "gate => 's => 's"
   assumes inverse_correct: "U (inverse g) (U g s) = s"
 begin
 
-fun exec :: "gate list \<Rightarrow> 's \<Rightarrow> 's" where
+fun exec :: "gate list => 's => 's" where
   "exec [] s = s"
 | "exec (g # gs) s = exec gs (U g s)"
 
@@ -49,7 +49,7 @@ proof
   finally show "exec (xs @ ys) t = t" .
 qed
 
-definition inv_pairs :: "gate list \<Rightarrow> gate list" where
+definition inv_pairs :: "gate list => gate list" where
   "inv_pairs gs = concat (map (\<lambda>g. [g, inverse g]) gs)"
 
 lemma inv_pairs_is_id:
@@ -128,20 +128,20 @@ datatype mat2 = Mat2 complex complex complex complex
 definition I2 :: mat2 where
   "I2 = Mat2 1 0 0 1"
 
-definition matmul :: "mat2 \<Rightarrow> mat2 \<Rightarrow> mat2" (infixl "\<otimes>" 70) where
+definition matmul :: "mat2 => mat2 => mat2" (infixl "\<otimes>" 70) where
   "A \<otimes> B =
-    (case A of Mat2 a b c d \<Rightarrow>
-     case B of Mat2 e f g h \<Rightarrow>
+    (case A of Mat2 a b c d =>
+     case B of Mat2 e f g h =>
        Mat2 (a*e + b*g) (a*f + b*h)
             (c*e + d*g) (c*f + d*h))"
 
-definition mv :: "mat2 \<Rightarrow> vec2 \<Rightarrow> vec2" where
+definition mv :: "mat2 => vec2 => vec2" where
   "mv A v =
-    (case A of Mat2 a b c d \<Rightarrow>
-     case v of (x,y) \<Rightarrow> (a*x + b*y, c*x + d*y))"
+    (case A of Mat2 a b c d =>
+     case v of (x,y) => (a*x + b*y, c*x + d*y))"
 
-definition smulM :: "complex \<Rightarrow> mat2 \<Rightarrow> mat2" (infixr "\<cdot>M" 75) where
-  "k \<cdot>M A = (case A of Mat2 a b c d \<Rightarrow> Mat2 (k*a) (k*b) (k*c) (k*d))"
+definition smulM :: "complex => mat2 => mat2" (infixr "\<cdot>M" 75) where
+  "k \<cdot>M A = (case A of Mat2 a b c d => Mat2 (k*a) (k*b) (k*c) (k*d))"
 
 definition inv_sqrt2 :: complex where
   "inv_sqrt2 = 1 / sqrt 2"
@@ -162,7 +162,7 @@ definition w :: complex where
 definition MT :: mat2 where "MT = Mat2 1 0 0 w"
 definition MTdg :: mat2 where "MTdg = Mat2 1 0 0 (cnj w)"
 
-fun M :: "gate \<Rightarrow> mat2" where
+fun M :: "gate => mat2" where
   "M H = MH"
 | "M X = MX"
 | "M Y = MY"
@@ -174,7 +174,7 @@ fun M :: "gate \<Rightarrow> mat2" where
 | "M Aux = I2"   (* placeholder: if you want Aux/Res matrix too, define them here *)
 | "M Res = I2"   (* placeholder *)
 
-definition Umat :: "gate \<Rightarrow> vec2 \<Rightarrow> vec2" where
+definition Umat :: "gate => vec2 => vec2" where
   "Umat g v = mv (M g) v"
 
 end
